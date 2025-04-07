@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import axios from "axios";
 
 type FileType = "image" | "document" | "audio" | "video" | "code" | "other";
 
@@ -90,7 +91,36 @@ export default function Chat() {
     }
   };
 
-  const handleSendMessage = () => {
+  const sendToBackend = async (
+    query: string,
+    attachedFiles: AttachedFile[]
+  ) => {
+    try {
+      const formData = new FormData();
+      formData.append("query", query);
+
+      attachedFiles.forEach((attachedFile) => {
+        formData.append("files", attachedFile.file);
+      });
+
+      const response = await axios.post(
+        "http://localhost:8000/process",
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
+      );
+
+      return response.data.structured_output;
+    } catch (error) {
+      console.error("Error sending data to backend:", error);
+      throw error;
+    }
+  };
+
+  const handleSendMessage = async () => {
     if (input.trim() === "" && files.length === 0) return;
 
     const newUserMessage: Message = {
@@ -103,25 +133,41 @@ export default function Chat() {
 
     setMessages([...messages, newUserMessage]);
     setInput("");
-    setFiles([]);
     setIsLoading(true);
 
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
 
-    setTimeout(() => {
+    try {
+      // Only keep the files array for sending to backend, clear UI state
+      const filesToSend = [...files];
+      setFiles([]);
+
+      // Send data to backend
+      const backendResponse = await sendToBackend(input, filesToSend);
+
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: `Received your message${
-          files.length > 0 ? " with attachments" : ""
-        }.`,
+        content: backendResponse || "I processed your request.",
         timestamp: new Date(),
       };
+
       setMessages((prev) => [...prev, aiResponse]);
+    } catch (error) {
+      const errorResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content:
+          "Sorry, there was an error processing your request. Please try again.",
+        timestamp: new Date(),
+      };
+
+      setMessages((prev) => [...prev, errorResponse]);
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   const removeFile = (id: string) => {
