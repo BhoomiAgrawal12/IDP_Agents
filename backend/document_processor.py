@@ -1,4 +1,4 @@
-import fitz  # PyMuPDF
+import fitz 
 import pytesseract
 from PIL import Image
 import io
