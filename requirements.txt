@@ -1,0 +1,9 @@
+fastapi
+uvicorn 
+pymupdf
+pytesseract
+langchain
+transformers
+llama-cpp-python
+pydantic
+python-multipart
