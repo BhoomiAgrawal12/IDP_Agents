@@ -26,9 +26,34 @@ export default function Chat() {
   const [files, setFiles] = useState<AttachedFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<AttachedFile | null>(null);
+  const [backendStatus, setBackendStatus] = useState<
+    "loading" | "online" | "offline"
+  >("loading");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Check backend status on component mount
+  useEffect(() => {
+    const checkBackendStatus = async () => {
+      try {
+        const response = await axios.get("http://localhost:8000/health", {
+          timeout: 5000,
+        });
+        if (response.data.status) {
+          setBackendStatus("online");
+          console.log("Backend is online:", response.data);
+        } else {
+          setBackendStatus("offline");
+        }
+      } catch (error) {
+        console.error("Backend connection error:", error);
+        setBackendStatus("offline");
+      }
+    };
+
+    checkBackendStatus();
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -99,9 +124,19 @@ export default function Chat() {
       const formData = new FormData();
       formData.append("query", query);
 
-      attachedFiles.forEach((attachedFile) => {
-        formData.append("files", attachedFile.file);
-      });
+      // Only append files if there are any
+      if (attachedFiles && attachedFiles.length > 0) {
+        attachedFiles.forEach((attachedFile) => {
+          formData.append("files", attachedFile.file);
+        });
+      } else {
+        // For FastAPI to recognize this as an empty list rather than missing parameter
+        formData.append(
+          "files",
+          new Blob([], { type: "application/octet-stream" }),
+          "empty"
+        );
+      }
 
       const response = await axios.post(
         "http://localhost:8000/process",
@@ -110,13 +145,36 @@ export default function Chat() {
           headers: {
             "Content-Type": "multipart/form-data",
           },
+          timeout: 60000, // 60 seconds timeout for larger files
         }
       );
 
       return response.data.structured_output;
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error sending data to backend:", error);
-      throw error;
+
+      // Try to extract a meaningful error message
+      let errorMessage =
+        "Could not connect to the server. Please check if the backend is running.";
+
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        const data = error.response.data;
+        errorMessage =
+          data.structured_output ||
+          data.error ||
+          `Server error: ${error.response.status}`;
+      } else if (error.request) {
+        // The request was made but no response was received
+        errorMessage =
+          "No response received from server. Please check if the backend is running.";
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        errorMessage = error.message || "An unknown error occurred";
+      }
+
+      return errorMessage;
     }
   };
 
@@ -144,6 +202,25 @@ export default function Chat() {
       const filesToSend = [...files];
       setFiles([]);
 
+      // Check if backend is available
+      if (backendStatus !== "online") {
+        // Try to reconnect to the backend
+        try {
+          const response = await axios.get("http://localhost:8000/health", {
+            timeout: 3000,
+          });
+          if (response.data.status) {
+            setBackendStatus("online");
+          } else {
+            throw new Error("Backend status check failed");
+          }
+        } catch (error) {
+          throw new Error(
+            "Backend server is not available. Please check if it's running."
+          );
+        }
+      }
+
       // Send data to backend
       const backendResponse = await sendToBackend(input, filesToSend);
 
@@ -155,12 +232,15 @@ export default function Chat() {
       };
 
       setMessages((prev) => [...prev, aiResponse]);
-    } catch (error) {
+    } catch (error: any) {
       const errorResponse: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
         content:
-          "Sorry, there was an error processing your request. Please try again.",
+          typeof error === "string"
+            ? error
+            : error.message ||
+              "Sorry, there was an error processing your request. Please try again.",
         timestamp: new Date(),
       };
 
@@ -377,10 +457,21 @@ export default function Chat() {
                   AI Assistant
                 </h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {isLoading ? "Typing..." : "Online"}
+                  {isLoading
+                    ? "Typing..."
+                    : backendStatus === "online"
+                    ? "Online"
+                    : backendStatus === "loading"
+                    ? "Connecting to backend..."
+                    : "Backend offline"}
                 </p>
               </div>
             </div>
+            {backendStatus === "offline" && (
+              <div className="bg-red-100 text-red-800 text-sm py-1 px-3 rounded-full">
+                Backend not connected
+              </div>
+            )}
           </div>
         </header>
 
