@@ -4,9 +4,9 @@ export interface SecurityReport {
   }
   
   export interface ProcessResult {
-    dataset: { filename: string; text: string }[];
-    qualityIssues: string[];
-    securityReport: SecurityReport;
+    dataset: { files: File[]; text: string };
+    qualityIssues?: string[];
+    securityReport?: SecurityReport;
   }
   
   export interface ProcessRequest {
