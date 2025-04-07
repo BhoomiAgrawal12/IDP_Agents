@@ -1,0 +1,7 @@
+fastapi==0.110.0
+uvicorn==0.27.1
+python-multipart==0.0.9
+# Optional dependencies
+pymupdf==1.23.26  # For PDF processing, comment out if installation fails
+Pillow==10.2.0  # For image processing
+pytesseract==0.3.10  # For OCR, requires tesseract-ocr to be installed on the system 
