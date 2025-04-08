@@ -1,4 +1,4 @@
-
+"use client";
 // import Chat from "./chat/page";
 
 // export default function Home() {
@@ -7,6 +7,7 @@
 // import "./globals.css";
 
 import React from "react";
+import { useRouter } from "next/navigation";
 import { Brain, FileText, Database, Shield, ExternalLink } from "lucide-react";
 
 // FeatureCard Component
@@ -29,6 +30,11 @@ const FeatureCard: React.FC<{ icon: React.ReactNode; title: string; description:
 
 // About Component
 const About: React.FC = () => {
+  const router = useRouter();
+
+  const handleTryChat = () => {
+    router.push("/chat"); // Navigates to /chat
+  };
   return (
     <div
       id="about"
@@ -60,9 +66,17 @@ const About: React.FC = () => {
             </div>
           </section>
 
-          <button className="px-8 py-4 text-lg font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-500 rounded-full hover:from-blue-700 hover:to-cyan-600 transform hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-cyan-500/25 mb-12">
+          {/* <button className="px-8 py-4 text-lg font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-500 rounded-full hover:from-blue-700 hover:to-cyan-600 transform hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-cyan-500/25 mb-12">
             Try AI Chat
-          </button>
+          </button> */}
+            <div className="flex justify-center mb-12">
+            <button
+              onClick={handleTryChat}
+              className="px-8 py-4 text-lg font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-500 rounded-full hover:from-blue-700 hover:to-cyan-600 transform hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-cyan-500/25"
+            >
+              Try AI Chat
+            </button>
+          </div>
 
           {/* Features Section */}
           <section id="features" className="py-24">

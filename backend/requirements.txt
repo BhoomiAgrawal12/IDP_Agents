@@ -9,7 +9,7 @@ bcrypt==4.3.0
 
 cryptography==44.0.2
 
-fastapi==0.115.12
+# fastapi==0.115.12
 fastapi-cli==0.0.7
 filelock==3.18.0
 firebase-admin==6.7.0
@@ -24,12 +24,12 @@ langsmith==0.3.26
 numpy==2.2.4
 presidio_analyzer==2.2.358
 presidio_anonymizer==2.2.358
-.3
+
 
 python-dotenv==1.1.0
 python-jose==3.4.0
 python-magic==0.4.27
-python-multipart==0.0.20
+# python-multipart==0.0.20
 
 regex==2024.11.6
 requests==2.32.3
@@ -37,4 +37,9 @@ requests==2.32.3
 slowapi==0.1.9
 
 websockets==14.2
-﻿
+
+yt-dlp
+moviepy
+torchaudio
+torch
+transformers

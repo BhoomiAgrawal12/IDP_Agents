@@ -138,3 +138,4 @@ def deidentify_and_store(doc: DocInput):
         "deidentified": clean_text,
         "entities": entity_map
     }
+

@@ -33,3 +33,4 @@ async def process_docs(query: str = Form(...), files: list[UploadFile] = Form(..
 @app.get("/health")
 async def health_check():
     return {"status": "Backend server is running!"} 
+
