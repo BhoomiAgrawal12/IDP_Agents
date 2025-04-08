@@ -1,0 +1,40 @@
+fastapi==0.110.0
+uvicorn==0.27.1
+python-multipart==0.0.9
+# Optional dependencies
+pymupdf==1.23.26  # For PDF processing, comment out if installation fails
+Pillow==10.2.0  # For image processing
+pytesseract==0.3.10  # For OCR, requires tesseract-ocr to be installed on the system 
+bcrypt==4.3.0
+
+cryptography==44.0.2
+
+fastapi==0.115.12
+fastapi-cli==0.0.7
+filelock==3.18.0
+firebase-admin==6.7.0
+
+langchain==0.3.23
+langchain-community==0.3.21
+langchain-core==0.3.51
+langchain-text-splitters==0.3.8
+langcodes==3.5.0
+langsmith==0.3.26
+
+numpy==2.2.4
+presidio_analyzer==2.2.358
+presidio_anonymizer==2.2.358
+.3
+
+python-dotenv==1.1.0
+python-jose==3.4.0
+python-magic==0.4.27
+python-multipart==0.0.20
+
+regex==2024.11.6
+requests==2.32.3
+
+slowapi==0.1.9
+
+websockets==14.2
+﻿
