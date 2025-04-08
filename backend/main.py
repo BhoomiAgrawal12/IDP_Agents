@@ -18,12 +18,29 @@ from presidio_anonymizer import AnonymizerEngine
 import magic
 import pyclamd
 import os
+import sqlite3
 import dotenv
 
 
 dotenv.load_dotenv()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+def init_db():
+    conn = sqlite3.connect(os.getenv("DB_PATH"))
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS processed_docs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query TEXT NOT NULL,
+            dataset TEXT NOT NULL,
+            security_report TEXT NOT NULL,
+            timestamp TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
 
+# Initialize the database on startup
+init_db()
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     # Implement your user authentication logic here
     # This is a basic example
@@ -36,9 +53,7 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-cred = credentials.Certificate(os.getenv("FIREBASE_CREDENTIALS"))  
-firebase_admin.initialize_app(cred)
-db = firestore.client()
+
 
 analyzer = AnalyzerEngine()
 anonymizer = AnonymizerEngine()
