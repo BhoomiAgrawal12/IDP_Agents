@@ -1,4 +1,4 @@
-from langchain.llms import HuggingFacePipeline
+from langchain_community.llms import HuggingFacePipeline
 from langchain.agents import initialize_agent, Tool, AgentType
 from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
 
