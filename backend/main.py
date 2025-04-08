@@ -18,12 +18,28 @@ from presidio_anonymizer import AnonymizerEngine
 import magic
 import pyclamd
 import os
+import sqlite3
 import dotenv
 
 
 dotenv.load_dotenv()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+def db():
+    conn = sqlite3.connect(os.getenv("DB_PATH"))
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS processed_docs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query TEXT NOT NULL,
+            dataset TEXT NOT NULL,
+            timestamp TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
 
+# Initialize the database on startup
+db()
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     # Implement your user authentication logic here
     # This is a basic example
@@ -36,9 +52,7 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-cred = credentials.Certificate(os.getenv("FIREBASE_CREDENTIALS"))  
-firebase_admin.initialize_app(cred)
-db = firestore.client()
+
 
 analyzer = AnalyzerEngine()
 anonymizer = AnonymizerEngine()
@@ -123,14 +137,14 @@ async def secure_data(current_user: dict = Depends(get_current_user)):
     return {"message": f"Hello, {current_user['username']}"}
 
 @app.post("/api/deidentify")
-def deidentify_and_store(doc: DocInput):
+def deidentify_and_store(doc: DocInput, query: str = Form(...)):
     clean_text, entity_map = deidentify_text(doc.content)
+    dataset = {"text": clean_text, "entities": entity_map}
 
     doc_ref = db.collection("processed_docs").document()
     doc_ref.set({
         "query": query,
         "dataset": dataset,
-        "security_report": consolidated_report.dict(),
         "timestamp": firestore.SERVER_TIMESTAMP
     })
 

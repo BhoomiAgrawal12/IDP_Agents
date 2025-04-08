@@ -14,7 +14,6 @@ def is_file_safe(file_path: str) -> bool:
         file_bytes = f.read()
         file_hash = hashlib.sha256(file_bytes).hexdigest()
 
- 
 
     # Check if file exists on VirusTotal
     headers = {"x-apikey": os.getenv("VIRUSTOTAL_API_KEY")}
