@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ProcessRequest, ProcessResult } from "@/types/security";
 import axios from "axios";
 import Image from "next/image";
+
 type FileType = "image" | "document" | "audio" | "video" | "code" | "other";
 
 type AttachedFile = {
@@ -26,12 +27,35 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<AttachedFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [result, setResult] = useState<ProcessResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<AttachedFile | null>(null);
+  const [backendStatus, setBackendStatus] = useState<
+    "loading" | "online" | "offline"
+  >("loading");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Check backend status on component mount
+  useEffect(() => {
+    const checkBackendStatus = async () => {
+      try {
+        const response = await axios.get("http://localhost:8000/health", {
+          timeout: 5000,
+        });
+        if (response.data.status) {
+          setBackendStatus("online");
+          console.log("Backend is online:", response.data);
+        } else {
+          setBackendStatus("offline");
+        }
+      } catch (error) {
+        console.error("Backend connection error:", error);
+        setBackendStatus("offline");
+      }
+    };
+
+    checkBackendStatus();
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -94,12 +118,71 @@ export default function Chat() {
     }
   };
 
+  const sendToBackend = async (
+    query: string,
+    attachedFiles: AttachedFile[]
+  ) => {
+    try {
+      const formData = new FormData();
+      formData.append("query", query);
+
+      // Only append files if there are any
+      if (attachedFiles && attachedFiles.length > 0) {
+        attachedFiles.forEach((attachedFile) => {
+          formData.append("files", attachedFile.file);
+        });
+      } else {
+        // For FastAPI to recognize this as an empty list rather than missing parameter
+        formData.append(
+          "files",
+          new Blob([], { type: "application/octet-stream" }),
+          "empty"
+        );
+      }
+
+      const response = await axios.post(
+        "http://localhost:8000/process",
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+          timeout: 60000,
+        }
+      );
+
+      return response.data.structured_output;
+    } catch (error: any) {
+      console.error("Error sending data to backend:", error);
+
+      // Try to extract a meaningful error message
+      let errorMessage =
+        "Could not connect to the server. Please check if the backend is running.";
+
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        const data = error.response.data;
+        errorMessage =
+          data.structured_output ||
+          data.error ||
+          `Server error: ${error.response.status}`;
+      } else if (error.request) {
+        // The request was made but no response was received
+        errorMessage =
+          "No response received from server. Please check if the backend is running.";
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        errorMessage = error.message || "An unknown error occurred";
+      }
+
+      return errorMessage;
+    }
+  };
+
   const handleSendMessage = async () => {
     if (input.trim() === "" && files.length === 0) return;
-    if (files.some((file) => file.file.size > 10 * 1024 * 1024)) {
-      setError("File size exceeds 10MB limit");
-      return;
-    }
+
     const newUserMessage: Message = {
       id: Date.now().toString(),
       role: "user",
@@ -107,69 +190,71 @@ export default function Chat() {
       attachments: files.length > 0 ? [...files] : undefined,
       timestamp: new Date(),
     };
-    const requestData: ProcessRequest = {
-      files: files.map((f) => f.file),
-      query: input,
-    };
-    const formData = new FormData();
-    requestData.files.forEach((file) => formData.append("files", file));
-    formData.append("query", requestData.query);
-
-    try {
-      const response = await axios.post<ProcessResult>(
-        `${process.env.NEXT_PUBLIC_BACKEND_API_URL}/process`,
-        formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-        }
-      );
-      setResult(response.data);
-    } catch (err) {
-      setError(
-        axios.isAxiosError(err) && err.response?.data?.error
-          ? err.response.data.error
-          : "Failed to process documents"
-      );
-    } finally {
-      setIsLoading(false);
-    }
 
     setMessages([...messages, newUserMessage]);
     setInput("");
-    setFiles([]);
     setIsLoading(true);
 
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
 
-    interface AIResponseMessage extends Message {
-      content: string;
-      attachments?: AttachedFile[];
-    }
+    try {
+      // Only keep the files array for sending to backend, clear UI state
+      const filesToSend = [...files];
+      setFiles([]);
 
-        setTimeout(() => {
-          const aiResponse: AIResponseMessage = {
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            content: `${result?.dataset.text}. ${result?.qualityIssues?.length} quality issues found.`,
-            attachments: result?.dataset.files.map((file: File) => ({
-              file,
-              type: getFileType(file),
-              preview: URL.createObjectURL(file),
-              id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            })),
-            timestamp: new Date(),
-          };
-          setMessages((prev: Message[]) => [...prev, aiResponse]);
-          setIsLoading(false);
-        }, 1500);
+      // Check if backend is available
+      if (backendStatus !== "online") {
+        // Try to reconnect to the backend
+        try {
+          const response = await axios.get("http://localhost:8000/health", {
+            timeout: 3000,
+          });
+          if (response.data.status) {
+            setBackendStatus("online");
+          } else {
+            throw new Error("Backend status check failed");
+          }
+        } catch (error: any) {
+          throw new Error(
+            "Backend server is not available. Please check if it's running.",
+            error
+          );
+        }
+      }
+
+      // Send data to backend
+      const backendResponse = await sendToBackend(input, filesToSend);
+
+      const aiResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: backendResponse || "I processed your request.",
+        timestamp: new Date(),
       };
 
-      const removeFile = (id: string): void => {
-        setFiles((prev: AttachedFile[]) => {
+      setMessages((prev) => [...prev, aiResponse]);
+    } catch (error: any) {
+      const errorResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content:
+          typeof error === "string"
+            ? error
+            : error.message ||
+              "Sorry, there was an error processing your request. Please try again.",
+        timestamp: new Date(),
+      };
+
+      setMessages((prev) => [...prev, errorResponse]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const removeFile = (id: string) => {
+    setFiles((prev) => {
       const fileToRemove = prev.find((f) => f.id === id);
       if (fileToRemove?.preview) URL.revokeObjectURL(fileToRemove.preview);
       return prev.filter((f) => f.id !== id);
@@ -296,7 +381,7 @@ export default function Chat() {
               className="max-w-full h-auto rounded"
               width={800}
               height={600}
-              style={{ width: "auto", height: "auto" }}
+              unoptimized={true}
             />
           )}
 
@@ -367,10 +452,21 @@ export default function Chat() {
                   AI Assistant
                 </h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {isLoading ? "Typing..." : "Online"}
+                  {isLoading
+                    ? "Typing..."
+                    : backendStatus === "online"
+                    ? "Online"
+                    : backendStatus === "loading"
+                    ? "Connecting to backend..."
+                    : "Backend offline"}
                 </p>
               </div>
             </div>
+            {backendStatus === "offline" && (
+              <div className="bg-red-100 text-red-800 text-sm py-1 px-3 rounded-full">
+                Backend not connected
+              </div>
+            )}
           </div>
         </header>
 
@@ -418,7 +514,7 @@ export default function Chat() {
                                 className="w-full h-full object-cover"
                                 width={80}
                                 height={80}
-                                style={{ width: "100%", height: "100%" }}
+                                unoptimized={true}
                               />
                               <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                 <svg
@@ -476,7 +572,7 @@ export default function Chat() {
           )}
           <div ref={messagesEndRef} />
         </div>
-        {error && <p className="text-red-500 mt-4">{error}</p>}
+
         {/* File Preview */}
         {files.length > 0 && (
           <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-3">
@@ -508,7 +604,7 @@ export default function Chat() {
                         className="w-full h-full object-cover"
                         width={80}
                         height={80}
-                        style={{ width: "100%", height: "100%" }}
+                        unoptimized={true}
                       />
                       <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                         <svg
