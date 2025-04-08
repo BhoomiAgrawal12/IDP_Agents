@@ -1,6 +1,9 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import axios from "axios";
+import Image from "next/image";
 
 type FileType = "image" | "document" | "audio" | "video" | "code" | "other";
 
@@ -25,9 +28,34 @@ export default function Chat() {
   const [files, setFiles] = useState<AttachedFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<AttachedFile | null>(null);
+  const [backendStatus, setBackendStatus] = useState<
+    "loading" | "online" | "offline"
+  >("loading");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Check backend status on component mount
+  useEffect(() => {
+    const checkBackendStatus = async () => {
+      try {
+        const response = await axios.get("http://localhost:8000/health", {
+          timeout: 5000,
+        });
+        if (response.data.status) {
+          setBackendStatus("online");
+          console.log("Backend is online:", response.data);
+        } else {
+          setBackendStatus("offline");
+        }
+      } catch (error) {
+        console.error("Backend connection error:", error);
+        setBackendStatus("offline");
+      }
+    };
+
+    checkBackendStatus();
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -90,7 +118,69 @@ export default function Chat() {
     }
   };
 
-  const handleSendMessage = () => {
+  const sendToBackend = async (
+    query: string,
+    attachedFiles: AttachedFile[]
+  ) => {
+    try {
+      const formData = new FormData();
+      formData.append("query", query);
+
+      // Only append files if there are any
+      if (attachedFiles && attachedFiles.length > 0) {
+        attachedFiles.forEach((attachedFile) => {
+          formData.append("files", attachedFile.file);
+        });
+      } else {
+        // For FastAPI to recognize this as an empty list rather than missing parameter
+        formData.append(
+          "files",
+          new Blob([], { type: "application/octet-stream" }),
+          "empty"
+        );
+      }
+
+      const response = await axios.post(
+        "http://localhost:8000/process",
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+          timeout: 60000,
+        }
+      );
+
+      return response.data.structured_output;
+    } catch (error: any) {
+      console.error("Error sending data to backend:", error);
+
+      // Try to extract a meaningful error message
+      let errorMessage =
+        "Could not connect to the server. Please check if the backend is running.";
+
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        const data = error.response.data;
+        errorMessage =
+          data.structured_output ||
+          data.error ||
+          `Server error: ${error.response.status}`;
+      } else if (error.request) {
+        // The request was made but no response was received
+        errorMessage =
+          "No response received from server. Please check if the backend is running.";
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        errorMessage = error.message || "An unknown error occurred";
+      }
+
+      return errorMessage;
+    }
+  };
+
+  const handleSendMessage = async () => {
     if (input.trim() === "" && files.length === 0) return;
 
     const newUserMessage: Message = {
@@ -103,25 +193,64 @@ export default function Chat() {
 
     setMessages([...messages, newUserMessage]);
     setInput("");
-    setFiles([]);
     setIsLoading(true);
 
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
 
-    setTimeout(() => {
+    try {
+      // Only keep the files array for sending to backend, clear UI state
+      const filesToSend = [...files];
+      setFiles([]);
+
+      // Check if backend is available
+      if (backendStatus !== "online") {
+        // Try to reconnect to the backend
+        try {
+          const response = await axios.get("http://localhost:8000/health", {
+            timeout: 3000,
+          });
+          if (response.data.status) {
+            setBackendStatus("online");
+          } else {
+            throw new Error("Backend status check failed");
+          }
+        } catch (error: any) {
+          throw new Error(
+            "Backend server is not available. Please check if it's running.",
+            error
+          );
+        }
+      }
+
+      // Send data to backend
+      const backendResponse = await sendToBackend(input, filesToSend);
+
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: `Received your message${
-          files.length > 0 ? " with attachments" : ""
-        }.`,
+        content: backendResponse || "I processed your request.",
         timestamp: new Date(),
       };
+
       setMessages((prev) => [...prev, aiResponse]);
+    } catch (error: any) {
+      const errorResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content:
+          typeof error === "string"
+            ? error
+            : error.message ||
+              "Sorry, there was an error processing your request. Please try again.",
+        timestamp: new Date(),
+      };
+
+      setMessages((prev) => [...prev, errorResponse]);
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   const removeFile = (id: string) => {
@@ -148,8 +277,7 @@ export default function Chat() {
             className="h-5 w-5"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="currentColor"
-          >
+            stroke="currentColor">
             <rect x="3" y="3" width="18" height="18" rx="2" />
             <circle cx="8.5" cy="8.5" r="1.5" />
             <polyline points="21 15 16 10 5 21" />
@@ -161,8 +289,7 @@ export default function Chat() {
             className="h-5 w-5"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="currentColor"
-          >
+            stroke="currentColor">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <polyline points="14 2 14 8 20 8" />
           </svg>
@@ -173,8 +300,7 @@ export default function Chat() {
             className="h-5 w-5"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="currentColor"
-          >
+            stroke="currentColor">
             <path d="M9 18V5l12-2v13" />
             <circle cx="6" cy="18" r="3" />
             <circle cx="18" cy="16" r="3" />
@@ -186,8 +312,7 @@ export default function Chat() {
             className="h-5 w-5"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="currentColor"
-          >
+            stroke="currentColor">
             <rect x="2" y="2" width="20" height="20" rx="2.18" />
             <polygon points="7 2 7 22 17 22 17 2" />
           </svg>
@@ -198,8 +323,7 @@ export default function Chat() {
             className="h-5 w-5"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="currentColor"
-          >
+            stroke="currentColor">
             <polyline points="16 18 22 12 16 6" />
             <polyline points="8 6 2 12 8 18" />
           </svg>
@@ -210,8 +334,7 @@ export default function Chat() {
             className="h-5 w-5"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="currentColor"
-          >
+            stroke="currentColor">
             <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
             <polyline points="13 2 13 9 20 9" />
           </svg>
@@ -225,26 +348,22 @@ export default function Chat() {
     return (
       <div
         className="fixed inset-0 bg-black/80 flex items-center justify-center z-50"
-        onClick={() => setSelectedFile(null)}
-      >
+        onClick={() => setSelectedFile(null)}>
         <div
           className="bg-white dark:bg-gray-800 rounded-lg p-4 max-w-3xl max-h-[90vh] overflow-auto"
-          onClick={(e) => e.stopPropagation()}
-        >
+          onClick={(e) => e.stopPropagation()}>
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate max-w-[80%]">
               {selectedFile.file.name}
             </h3>
             <button
               onClick={() => setSelectedFile(null)}
-              className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-            >
+              className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
               <svg
                 className="h-6 w-6"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="currentColor"
-              >
+                stroke="currentColor">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -256,10 +375,13 @@ export default function Chat() {
           </div>
 
           {selectedFile.type === "image" && selectedFile.preview && (
-            <img
+            <Image
               src={selectedFile.preview}
               alt={selectedFile.file.name}
               className="max-w-full h-auto rounded"
+              width={800}
+              height={600}
+              unoptimized={true}
             />
           )}
 
@@ -321,8 +443,7 @@ export default function Chat() {
                   className="h-6 w-6 text-white"
                   viewBox="0 0 24 24"
                   fill="none"
-                  stroke="currentColor"
-                >
+                  stroke="currentColor">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>
               </div>
@@ -331,10 +452,21 @@ export default function Chat() {
                   AI Assistant
                 </h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {isLoading ? "Typing..." : "Online"}
+                  {isLoading
+                    ? "Typing..."
+                    : backendStatus === "online"
+                    ? "Online"
+                    : backendStatus === "loading"
+                    ? "Connecting to backend..."
+                    : "Backend offline"}
                 </p>
               </div>
             </div>
+            {backendStatus === "offline" && (
+              <div className="bg-red-100 text-red-800 text-sm py-1 px-3 rounded-full">
+                Backend not connected
+              </div>
+            )}
           </div>
         </header>
 
@@ -347,8 +479,7 @@ export default function Chat() {
                   className="h-16 w-16 mx-auto mb-4"
                   viewBox="0 0 24 24"
                   fill="none"
-                  stroke="currentColor"
-                >
+                  stroke="currentColor">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>
                 <p>Start by sending a message or attaching files</p>
@@ -360,15 +491,13 @@ export default function Chat() {
                 key={message.id}
                 className={`flex ${
                   message.role === "user" ? "justify-end" : "justify-start"
-                }`}
-              >
+                }`}>
                 <div
                   className={`max-w-[70%] p-3 rounded-lg ${
                     message.role === "user"
                       ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white"
                       : "bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700"
-                  }`}
-                >
+                  }`}>
                   <p className="text-sm">{message.content}</p>
                   {message.attachments && (
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -376,22 +505,23 @@ export default function Chat() {
                         <div
                           key={attachment.id}
                           className="relative cursor-pointer group"
-                          onClick={() => setSelectedFile(attachment)}
-                        >
+                          onClick={() => setSelectedFile(attachment)}>
                           {attachment.type === "image" && attachment.preview ? (
                             <div className="w-20 h-20 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-600">
-                              <img
+                              <Image
                                 src={attachment.preview}
                                 alt={attachment.file.name}
                                 className="w-full h-full object-cover"
+                                width={80}
+                                height={80}
+                                unoptimized={true}
                               />
                               <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                 <svg
                                   className="h-6 w-6 text-white"
                                   viewBox="0 0 24 24"
                                   fill="none"
-                                  stroke="currentColor"
-                                >
+                                  stroke="currentColor">
                                   <path
                                     strokeLinecap="round"
                                     strokeLinejoin="round"
@@ -424,8 +554,7 @@ export default function Chat() {
                       message.role === "user"
                         ? "text-white/80 text-right"
                         : "text-gray-500"
-                    }`}
-                  >
+                    }`}>
                     {formatTime(message.timestamp)}
                   </p>
                 </div>
@@ -458,8 +587,7 @@ export default function Chat() {
                   );
                   setFiles([]);
                 }}
-                className="text-sm text-red-500 hover:text-red-600"
-              >
+                className="text-sm text-red-500 hover:text-red-600">
                 Clear All
               </button>
             </div>
@@ -469,20 +597,21 @@ export default function Chat() {
                   {file.type === "image" && file.preview ? (
                     <div
                       className="w-20 h-20 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-600 cursor-pointer"
-                      onClick={() => setSelectedFile(file)}
-                    >
-                      <img
+                      onClick={() => setSelectedFile(file)}>
+                      <Image
                         src={file.preview}
                         alt={file.file.name}
                         className="w-full h-full object-cover"
+                        width={80}
+                        height={80}
+                        unoptimized={true}
                       />
                       <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                         <svg
                           className="h-6 w-6 text-white"
                           viewBox="0 0 24 24"
                           fill="none"
-                          stroke="currentColor"
-                        >
+                          stroke="currentColor">
                           <path
                             strokeLinecap="round"
                             strokeLinejoin="round"
@@ -501,8 +630,7 @@ export default function Chat() {
                   ) : (
                     <div
                       className="w-20 h-20 bg-gray-100 dark:bg-gray-700 rounded-lg flex flex-col items-center justify-center p-2 cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                      onClick={() => setSelectedFile(file)}
-                    >
+                      onClick={() => setSelectedFile(file)}>
                       {getFileIcon(file.type)}
                       <span className="text-xs text-center truncate w-full mt-1">
                         {file.file.name}
@@ -514,8 +642,7 @@ export default function Chat() {
                       e.stopPropagation();
                       removeFile(file.id);
                     }}
-                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
+                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                     ×
                   </button>
                 </div>
@@ -544,14 +671,12 @@ export default function Chat() {
               />
               <button
                 onClick={openFileSelector}
-                className="absolute right-3 bottom-3 text-gray-500 hover:text-purple-500"
-              >
+                className="absolute right-3 bottom-3 text-gray-500 hover:text-purple-500">
                 <svg
                   className="h-5 w-5"
                   viewBox="0 0 24 24"
                   fill="none"
-                  stroke="currentColor"
-                >
+                  stroke="currentColor">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -571,14 +696,12 @@ export default function Chat() {
             <button
               onClick={handleSendMessage}
               disabled={input.trim() === "" && files.length === 0}
-              className="bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg p-3 disabled:opacity-50 hover:from-purple-600 hover:to-pink-600 transition-colors"
-            >
+              className="bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg p-3 disabled:opacity-50 hover:from-purple-600 hover:to-pink-600 transition-colors">
               <svg
                 className="h-5 w-5"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="currentColor"
-              >
+                stroke="currentColor">
                 <line x1="22" y1="2" x2="11" y2="13" />
                 <polygon points="22 2 15 22 11 13 2 9 22 2" />
               </svg>
