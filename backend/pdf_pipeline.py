@@ -15,7 +15,7 @@ from langchain.memory import ConversationBufferMemory
 from sentence_transformers import SentenceTransformer, util
 
 # Set environment variable for Hugging Face token
-os.environ["HUGGINGFACE_TOKEN"] = "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"
+os.environ["HUGGINGFACE_TOKEN"] = os.environ.get("HUGGINGFACE_TOKEN")
 
 # Load SpaCy model for entity extraction
 try:
