@@ -1,46 +1,64 @@
-# backend/security.py
-from jose import JWTError, jwt
-from passlib.context import CryptContext
-from datetime import datetime, timedelta
-from fastapi import HTTPException, status, Depends
-from fastapi.security import OAuth2PasswordBearer
-import os
-from dotenv import load_dotenv
+import sqlite3
+import json
+import uuid
+from presidio_analyzer import AnalyzerEngine
+from presidio_anonymizer import AnonymizerEngine
+from presidio_anonymizer.entities import OperatorConfig
+from cryptography.fernet import Fernet
 
-load_dotenv()
+# 🔑 Generate this once and store securely
+# key = Fernet.generate_key()
+key = b'your-32-byte-base64-key-here'  # Replace this with your actual key
+fernet = Fernet(key)
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+def encrypt_text(text: str) -> str:
+    return fernet.encrypt(text.encode()).decode()
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+def deidentify_and_encrypt_to_db(db_path: str, table: str, field: str):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
 
-# Fake user DB (replace with real DB later)
-fake_users_db = {
-    "testuser": {
-        "username": "testuser",
-        "password": pwd_context.hash("testpassword"),
-        "role": "user",
-    }
-}
+    analyzer = AnalyzerEngine()
+    anonymizer = AnonymizerEngine()
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    identifier_field = field + '_identifier'
+    map_field = field + '_identifier_map'
 
-def create_access_token(data: dict, expires_delta: timedelta):
-    to_encode = data.copy()
-    expire = datetime.utcnow() + expires_delta
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    cursor.execute(f"PRAGMA table_info({table})")
+    cols = [col[1] for col in cursor.fetchall()]
+    if identifier_field not in cols:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {identifier_field} TEXT")
+    if map_field not in cols:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {map_field} TEXT")
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username not in fake_users_db:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
-        return fake_users_db[username]
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    cursor.execute(f"SELECT id, {field} FROM {table} WHERE {identifier_field} IS NULL")
+    rows = cursor.fetchall()
+
+    for row in rows:
+        record_id, original_text = row
+        results = analyzer.analyze(text=original_text, language='en')
+        operators = {}
+        entity_map = {}
+
+        for entity in results:
+            ent_type = entity.entity_type.upper()
+            uid = f"{ent_type}_{uuid.uuid4().hex[:8]}"
+            operators[ent_type] = OperatorConfig("replace", {"new_value": uid})
+            entity_map[uid] = ent_type
+
+        anonymized = anonymizer.anonymize(
+            text=original_text,
+            analyzer_results=results,
+            operators=operators
+        )
+
+        encrypted_text = encrypt_text(anonymized.text)
+        encrypted_map = encrypt_text(json.dumps(entity_map))
+
+        cursor.execute(
+            f"UPDATE {table} SET {identifier_field} = ?, {map_field} = ? WHERE id = ?",
+            (encrypted_text, encrypted_map, record_id)
+        )
+
+    conn.commit()
+    conn.close()

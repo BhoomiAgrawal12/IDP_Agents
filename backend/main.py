@@ -17,7 +17,11 @@ from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
 import magic
 import pyclamd
+import os
+import dotenv
 
+
+dotenv.load_dotenv()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
@@ -32,7 +36,7 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-cred = credentials.Certificate("/home/kamini08/projects/hackToFuture/triCharm/backend/tricharm-idp-firebase-adminsdk.json")  
+cred = credentials.Certificate(os.getenv("FIREBASE_CREDENTIALS"))  
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
