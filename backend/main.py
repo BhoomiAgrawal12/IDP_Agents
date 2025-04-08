@@ -24,7 +24,7 @@ import dotenv
 
 dotenv.load_dotenv()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-def init_db():
+def db():
     conn = sqlite3.connect(os.getenv("DB_PATH"))
     cursor = conn.cursor()
     cursor.execute("""
@@ -32,7 +32,6 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             query TEXT NOT NULL,
             dataset TEXT NOT NULL,
-            security_report TEXT NOT NULL,
             timestamp TEXT NOT NULL
         )
     """)
@@ -40,7 +39,7 @@ def init_db():
     conn.close()
 
 # Initialize the database on startup
-init_db()
+db()
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     # Implement your user authentication logic here
     # This is a basic example
@@ -138,14 +137,14 @@ async def secure_data(current_user: dict = Depends(get_current_user)):
     return {"message": f"Hello, {current_user['username']}"}
 
 @app.post("/api/deidentify")
-def deidentify_and_store(doc: DocInput):
+def deidentify_and_store(doc: DocInput, query: str = Form(...)):
     clean_text, entity_map = deidentify_text(doc.content)
+    dataset = {"text": clean_text, "entities": entity_map}
 
     doc_ref = db.collection("processed_docs").document()
     doc_ref.set({
         "query": query,
         "dataset": dataset,
-        "security_report": consolidated_report.dict(),
         "timestamp": firestore.SERVER_TIMESTAMP
     })
 
